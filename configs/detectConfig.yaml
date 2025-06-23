@@ -1,0 +1,12 @@
+modelPath: /app/models/yolo11n.engine # 模型路径
+
+inputSize: 640 # 推理图像大小
+scoreThreshold: 0.55 # 置信度阈值
+nmsThreshold: 0.5 # 非极大值抑制阈值
+
+# 类别列表
+classNames:
+  0: a
+  1: b
+
+showFlag: false # 是否显示绘制并展示

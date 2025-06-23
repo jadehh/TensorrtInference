@@ -1,0 +1,116 @@
+cmake_minimum_required(VERSION 3.22.1)
+set(DEMO_NAME "tensorrt_inference")
+project(${DEMO_NAME})
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
+
+
+set(CMAKE_CXX_STANDARD 17)
+SET(OPENCV_DIR "/usr/local/opencv" CACHE PATH "Location of libraries")
+SET(TENSORRT_DIR "/usr/local/tensorrt" CACHE PATH "Location of libraries")
+SET(CUDA_DIR "/usr/local/cuda" CACHE PATH "Location of libraries")
+set(YAML_CPP_DIR "/usr/local/yaml" CACHE PATH "location of libraries")
+
+if (NOT DEFINED OPENCV_DIR OR OPENCV_DIR STREQUAL "")
+    message(FATAL_ERROR "please set OPENCV_DIR with -DOPENCV_DIR=/usr/local/opencv")
+endif ()
+
+if (NOT DEFINED TENSORRT_DIR OR TENSORRT_DIR STREQUAL "")
+    message(FATAL_ERROR "please set TENSORRT_DIR with -DTENSORRT_DIR=/usr/local/tensorrt")
+endif ()
+
+if (NOT DEFINED CUDA_DIR OR CUDA_DIR STREQUAL "")
+    message(FATAL_ERROR "please set CUDA_DIR with -DCUDA_DIR=/usr/local/cuda")
+endif ()
+
+if (NOT DEFINED YAML_CPP_DIR OR YAML_CPP_DIR STREQUAL "")
+    message(FATAL_ERROR "please set YAML_CPP_DIR with -DYAML_CPP_DIR=/usr/local/yaml")
+endif ()
+
+
+set(OPENCV_INCLUDE_DIR "${OPENCV_DIR}/include/opencv4")
+set(OPENCV_LIB_DIR "${OPENCV_DIR}/lib")
+
+set(TENSORRT_INCLUDE_DIR "${TENSORRT_DIR}/include")
+set(TENSORRT_LIB_DIR "${TENSORRT_DIR}/lib")
+
+set(CUDA_INCLUDE_DIR "${CUDA_DIR}/include")
+if (NOT WIN32)
+    set(CUDA_LIB_DIR "${CUDA_DIR}/lib64")
+else ()
+    set(CUDA_LIB_DIR "${CUDA_DIR}/lib/x64")
+endif ()
+
+set(YAML_CPP_INCLUDE_DIR "${YAML_DIR}/include")
+set(YAML_CPP_LIB_DIR "${YAML_DIR}/lib")
+
+include_directories(
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_BINARY_DIR}
+        ${OPENCV_INCLUDE_DIR}
+        ${TENSORRT_INCLUDE_DIR}
+        ${CUDA_INCLUDE_DIR}
+        ${YAML_CPP_INCLUDE_DIR}
+)
+link_directories(
+        ${OPENCV_LIB_DIR}
+        ${TENSORRT_LIB_DIR}
+        ${CUDA_LIB_DIR}
+        ${YAML_CPP_LIB_DIR}
+)
+set(CUDA_LIBS cudart)
+set(TENSORRT_LIBS nvinfer)
+set(YAML_CPP_LIBS yaml-cpp)
+set(OPENCV_LIBS
+        opencv_calib3d
+        opencv_core
+        opencv_dnn
+        opencv_features2d
+        opencv_flann
+        opencv_highgui
+        opencv_imgcodecs
+        opencv_imgproc
+        opencv_ml
+        opencv_objdetect
+        opencv_photo
+        opencv_stitching
+        opencv_video
+        opencv_videoio)
+
+# 消除警告
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    add_compile_options(-Wno-deprecated-declarations)
+endif ()
+
+add_executable(
+        ${DEMO_NAME}
+        utils/include/model.hpp
+        utils/model.cpp
+        utils/include/draw.hpp
+        utils/draw.cpp
+        main.cpp
+)
+if (NOT WIN32)
+    target_link_libraries(
+            ${DEMO_NAME}
+            pthread
+            ${CUDA_LIBS}
+            ${TENSORRT_LIBS}
+            ${OPENCV_LIBS}
+            ${YAML_CPP_LIBS}
+    )
+else ()
+    target_link_libraries(
+            ${DEMO_NAME}
+            ${CUDA_LIBS}
+            ${TENSORRT_LIBS}
+            ${OPENCV_LIBS}
+            ${YAML_CPP_LIBS}
+    )
+endif ()
+if (WIN32)
+    add_custom_command(TARGET ${DEMO_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${YAML_DIR}/lib/yaml-cpp.dll ./yaml-cpp.dll
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENCV_DIR}/build/x64/vc16/bin/opencv_world4110.dll ./opencv_world4110.dll
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENCV_DIR}/build/x64/vc16/bin/opencv_world4110d.dll ./opencv_world4110d.dll
+    )
+endif ()
