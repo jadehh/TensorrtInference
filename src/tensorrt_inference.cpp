@@ -14,16 +14,13 @@ static Logger logger;
 #define warmup true
 
 
-TensorrtInference::TensorrtInference(string model_path, nvinfer1::ILogger& logger)
-{
+TensorrtInference::TensorrtInference(string model_path, nvinfer1::ILogger &logger) {
     // Deserialize an engine
-    if (model_path.find(".onnx") == std::string::npos)
-    {
+    if (model_path.find(".onnx") == std::string::npos) {
         init(model_path, logger);
     }
     // Build an engine from an onnx model
-    else
-    {
+    else {
         build(model_path, logger);
         saveEngine(model_path);
     }
@@ -41,8 +38,7 @@ TensorrtInference::TensorrtInference(string model_path, nvinfer1::ILogger& logge
 }
 
 
-void TensorrtInference::init(std::string engine_path, nvinfer1::ILogger& logger)
-{
+void TensorrtInference::init(std::string engine_path, nvinfer1::ILogger &logger) {
     // Read the engine file
     ifstream engineStream(engine_path, ios::binary);
     engineStream.seekg(0, ios::end);
@@ -60,37 +56,31 @@ void TensorrtInference::init(std::string engine_path, nvinfer1::ILogger& logger)
     // Get input and output sizes of the model
 
 
-    #if NV_TENSORRT_MAJOR < 10
+#if NV_TENSORRT_MAJOR < 10
     input_h = engine->getBindingDimensions(0).d[2];
     input_w = engine->getBindingDimensions(0).d[3];
     detection_attribute_size = engine->getBindingDimensions(1).d[1];
     num_detections = engine->getBindingDimensions(1).d[2];
-    #else
-    nvinfer1::Dims inputDims = this->engine->getTensorShape("images");
-    nvinfer1::Dims outputDims = this->engine->getTensorShape("output0");
+#else
 
-    input_h = inputDims.d[2];
-    input_w = inputDims.d[3];
-
-    detection_attribute_size = outputDims.d[1];
-    num_detections = outputDims.d[2];
-    #endif
-
+    const auto [inputDims, input] = this->engine->getTensorShape("images");
+    const auto [outputDims,  output] = this->engine->getTensorShape("output0");
+    input_h = static_cast<int>(input[2]);
+    input_w = static_cast<int>(input[3]);
+    detection_attribute_size = static_cast<int>(output[1]);
+    num_detections = static_cast<int>(output[2]);
+#endif
     num_classes = detection_attribute_size - 4;
-
     // Initialize input buffers
-    cpu_output_buffer = new float[detection_attribute_size * num_detections];
+    CUDA_CHECK(cudaMallocHost(&cpu_output_buffer, detection_attribute_size * num_detections * sizeof(float));)
+
     CUDA_CHECK(cudaMalloc(&gpu_buffers[0], 3 * input_w * input_h * sizeof(float)));
     // Initialize output buffer
     CUDA_CHECK(cudaMalloc(&gpu_buffers[1], detection_attribute_size * num_detections * sizeof(float)));
     //
     CUDA_CHECK(cudaMalloc(&gpu_buffers[2], detection_attribute_size * num_detections * sizeof(float)));
-
     cuda_preprocess_init(MAX_IMAGE_SIZE);
-
     CUDA_CHECK(cudaStreamCreate(&stream));
-
-
     if (warmup) {
         for (int i = 0; i < 10; i++) {
             this->infer();
@@ -99,13 +89,12 @@ void TensorrtInference::init(std::string engine_path, nvinfer1::ILogger& logger)
     }
 }
 
-TensorrtInference::~TensorrtInference()
-{
+TensorrtInference::~TensorrtInference() {
     // Release stream and buffers
     CUDA_CHECK(cudaStreamSynchronize(stream));
     CUDA_CHECK(cudaStreamDestroy(stream));
-    for (int i = 0; i < 3; i++)
-        CUDA_CHECK(cudaFree(gpu_buffers[i]));
+    for (const auto & gpu_buffer : gpu_buffers)
+        CUDA_CHECK(cudaFree(gpu_buffer));
     delete[] cpu_output_buffer;
 
     // Destroy the engine
@@ -115,31 +104,45 @@ TensorrtInference::~TensorrtInference()
     delete runtime;
 }
 
-void TensorrtInference::preprocess(Mat& image) {
+void TensorrtInference::preprocess(Mat &image) const {
     // Preprocessing data on gpu
     cuda_preprocess(image.ptr(), image.cols, image.rows, gpu_buffers[0], input_w, input_h, stream);
     CUDA_CHECK(cudaStreamSynchronize(stream));
 }
 
-void TensorrtInference::infer()
-{
+void TensorrtInference::infer() const {
 #if NV_TENSORRT_MAJOR < 10
-    context->enqueueV2((void**)gpu_buffers, stream, nullptr);
+    context->enqueueV2((void **) gpu_buffers, stream, nullptr);
 #else
-    this->context->executeV2((void**)gpu_buffers);
+    // 设置输入输出张量
+    context->setTensorAddress("images", gpu_buffers[0]);
+    context->setTensorAddress("output0",gpu_buffers[1]);
+    this->context->enqueueV3(stream);
 #endif
 }
 
-void TensorrtInference::postprocess(vector<Detection>& output)
-{
+void TensorrtInference::postprocess(vector<Detection> &output) const {
+    const auto cuda_postprocess_start_time = static_cast<double>(cv::getTickCount());
     cuda_postprocess(gpu_buffers[1], num_detections, num_classes, conf_threshold, gpu_buffers[2], stream);
-    CUDA_CHECK(cudaMemcpyAsync(cpu_output_buffer, gpu_buffers[2], num_detections * detection_attribute_size * sizeof(float), cudaMemcpyDeviceToHost, stream));
+    std::cout <<"cuda_postprocess: " << ((static_cast<double>(cv::getTickCount()) - cuda_postprocess_start_time) / cv::getTickFrequency()) * 1000 << "ms,";
+    const auto cuda_memcpy_start_time = static_cast<double>(cv::getTickCount());
+    // 添加精确计时
+    cudaEvent_t copy_start, copy_stop;
+    cudaEventCreate(&copy_start);
+    cudaEventCreate(&copy_stop);
+    cudaEventRecord(copy_start, stream);
+    CUDA_CHECK(cudaMemcpyAsync(cpu_output_buffer, gpu_buffers[2], num_detections * detection_attribute_size * sizeof(float),cudaMemcpyDeviceToHost, stream));
+    cudaEventRecord(copy_stop, stream);
+    cudaEventSynchronize(copy_stop);
+    float copy_ms = 0;
+    cudaEventElapsedTime(&copy_ms, copy_start, copy_stop);
+    std::cout << "D2H Copy: " << copy_ms << " ms, Data: " << (num_detections * detection_attribute_size * sizeof(float)/1024.0)<< "KB,";
+    std::cout << "cuda_memcpy_start_time: " <<  ((static_cast<double>(cv::getTickCount()) - cuda_memcpy_start_time) / cv::getTickFrequency()) *  1000 << "ms,";
     CUDA_CHECK(cudaStreamSynchronize(stream));
 
     vector<Rect> boxes;
     vector<int> class_ids;
     vector<float> confidences;
-
     for (int i = 0; i < num_detections; ++i) {
         float class_id = cpu_output_buffer[i * 6 + 4];
         float conf = cpu_output_buffer[i * 6 + 5];
@@ -160,8 +163,7 @@ void TensorrtInference::postprocess(vector<Detection>& output)
     }
     vector<int> nms_result;
     dnn::NMSBoxes(boxes, confidences, conf_threshold, nms_threshold, nms_result);
-    for (int i = 0; i < nms_result.size(); i++)
-    {
+    for (int i = 0; i < nms_result.size(); i++) {
         Detection result;
         int idx = nms_result[i];
         result.class_id = class_ids[idx];
@@ -171,19 +173,17 @@ void TensorrtInference::postprocess(vector<Detection>& output)
     }
 }
 
-void TensorrtInference::build(std::string onnxPath, nvinfer1::ILogger& logger)
-{
+void TensorrtInference::build(std::string onnxPath, nvinfer1::ILogger &logger) {
     auto builder = createInferBuilder(logger);
     const auto explicitBatch = 1U << static_cast<uint32_t>(NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
-    INetworkDefinition* network = builder->createNetworkV2(explicitBatch);
-    IBuilderConfig* config = builder->createBuilderConfig();
-    if (isFP16)
-    {
+    INetworkDefinition *network = builder->createNetworkV2(explicitBatch);
+    IBuilderConfig *config = builder->createBuilderConfig();
+    if (isFP16) {
         config->setFlag(BuilderFlag::kFP16);
     }
-    nvonnxparser::IParser* parser = nvonnxparser::createParser(*network, logger);
+    nvonnxparser::IParser *parser = nvonnxparser::createParser(*network, logger);
     bool parsed = parser->parseFromFile(onnxPath.c_str(), static_cast<int>(nvinfer1::ILogger::Severity::kINFO));
-    IHostMemory* plan{ builder->buildSerializedNetwork(*network, *config) };
+    IHostMemory *plan{builder->buildSerializedNetwork(*network, *config)};
 
     runtime = createInferRuntime(logger);
 
@@ -197,31 +197,26 @@ void TensorrtInference::build(std::string onnxPath, nvinfer1::ILogger& logger)
     delete plan;
 }
 
-bool TensorrtInference::saveEngine(const std::string& onnxpath)
-{
+bool TensorrtInference::saveEngine(const std::string &onnxpath) {
     // Create an engine path from onnx path
     std::string engine_path;
     size_t dotIndex = onnxpath.find_last_of(".");
     if (dotIndex != std::string::npos) {
         engine_path = onnxpath.substr(0, dotIndex) + ".engine";
-    }
-    else
-    {
+    } else {
         return false;
     }
 
     // Save the engine to the path
-    if (engine)
-    {
-        nvinfer1::IHostMemory* data = engine->serialize();
+    if (engine) {
+        nvinfer1::IHostMemory *data = engine->serialize();
         std::ofstream file;
         file.open(engine_path, std::ios::binary | std::ios::out);
-        if (!file.is_open())
-        {
+        if (!file.is_open()) {
             std::cout << "Create engine file" << engine_path << " failed" << std::endl;
             return 0;
         }
-        file.write((const char*)data->data(), data->size());
+        file.write((const char *) data->data(), data->size());
         file.close();
 
         delete data;
@@ -229,28 +224,23 @@ bool TensorrtInference::saveEngine(const std::string& onnxpath)
     return true;
 }
 
-void TensorrtInference::draw(Mat& image, const vector<Detection>& output)
-{
-    const float ratio_h = input_h / (float)image.rows;
-    const float ratio_w = input_w / (float)image.cols;
+void TensorrtInference::draw(Mat &image, const vector<Detection> &output) {
+    const float ratio_h = input_h / (float) image.rows;
+    const float ratio_w = input_w / (float) image.cols;
 
-    for (int i = 0; i < output.size(); i++)
-    {
+    for (int i = 0; i < output.size(); i++) {
         auto detection = output[i];
         auto box = detection.bbox;
         auto class_id = detection.class_id;
         auto conf = detection.conf;
         cv::Scalar color = cv::Scalar(COLORS[class_id][0], COLORS[class_id][1], COLORS[class_id][2]);
 
-        if (ratio_h > ratio_w)
-        {
+        if (ratio_h > ratio_w) {
             box.x = box.x / ratio_w;
             box.y = (box.y - (input_h - ratio_w * image.rows) / 2) / ratio_w;
             box.width = box.width / ratio_w;
             box.height = box.height / ratio_w;
-        }
-        else
-        {
+        } else {
             box.x = (box.x - (input_w - ratio_h * image.cols) / 2) / ratio_h;
             box.y = box.y / ratio_h;
             box.width = box.width / ratio_h;

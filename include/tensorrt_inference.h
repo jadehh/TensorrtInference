@@ -22,9 +22,9 @@ public:
     TensorrtInference(string model_path, nvinfer1::ILogger& logger);
     ~TensorrtInference();
 
-    void preprocess(Mat& image);
-    void infer();
-    void postprocess(vector<Detection>& output);
+    void preprocess(Mat& image) const;
+    void infer() const;
+    void postprocess(vector<Detection>& output) const;
     void draw(Mat& image, const vector<Detection>& output);
 
 private:

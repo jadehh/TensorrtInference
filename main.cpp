@@ -123,25 +123,20 @@ int main(int argc, char** argv)
                auto preprocess_start_time = static_cast<double>(cv::getTickCount());
                vector<Detection> objects;
                model.preprocess(image);
-               std::cout << "Speed:"
-                         << ((static_cast<double>(cv::getTickCount()) - preprocess_start_time) / cv::getTickFrequency()) *
-                            1000 << "ms " << "preprocess,";
+               std::cout << "preprocess: " << (static_cast<double>(cv::getTickCount()) - preprocess_start_time) / cv::getTickFrequency() * 1000 << "ms,";
                auto inference_start_time = static_cast<double>(cv::getTickCount());
                model.infer();
-               std::cout << ((static_cast<double>(cv::getTickCount()) - inference_start_time) / cv::getTickFrequency()) *
-                            1000 << "ms inference, ";
+               std::cout << "inference: " << ((static_cast<double>(cv::getTickCount()) - inference_start_time) / cv::getTickFrequency()) * 1000 << "ms,";
                auto postprocess_start_time = static_cast<double>(cv::getTickCount());
                model.postprocess(objects);
-               std::cout << ((static_cast<double>(cv::getTickCount()) - postprocess_start_time) / cv::getTickFrequency()) *
-                            1000 << "ms postprocess, ";
-               std::cout << ((static_cast<double>(cv::getTickCount()) - preprocess_start_time) / cv::getTickFrequency()) *
-                            1000 << "ms total" << std::endl;
+               std::cout <<"postprocess: "<<  ((static_cast<double>(cv::getTickCount()) - postprocess_start_time) / cv::getTickFrequency()) * 1000 << "ms,";
+               std::cout << "total: "<<  ((static_cast<double>(cv::getTickCount()) - preprocess_start_time) / cv::getTickFrequency()) * 1000 << "ms," << std::endl;
+               // namedWindow("Result",0);
+               // model.draw(image, objects);
+               // imshow("Result", image);
+               // waitKey(1);
            }
-//            namedWindow("Result",0);
-//            model.draw(image, objects);
-//            imshow("Result", image);
-//
-//            waitKey(1);
+
         }
         std::cout << "all time: " <<((static_cast<double>(cv::getTickCount()) - start_time) / cv::getTickFrequency()) << "s" << std::endl;
     }
