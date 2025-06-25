@@ -1,49 +1,149 @@
-#include <yaml-cpp/yaml.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
-#include "utils/include/draw.hpp"
+#include <iostream>
+#include <string>
+#include "include/tensorrt_inference.h"
 
-const YAML::Node modelConfig = YAML::LoadFile("/app/configs/detectConfig.yaml");                                      // 模型配置
 
-const std::string modelPath = modelConfig["modelPath"].as<std::string>(); // 模型路径
-const int inputSize = modelConfig["inputSize"].as<int>();                 // 图像输入大小
-const float scoreThreshold = modelConfig["scoreThreshold"].as<float>();   // 置信度阈值
-const float nmsThreshold = modelConfig["nmsThreshold"].as<float>();       // 非极大值抑制阈值
-const std::vector<std::string> classNames = []()
-{
-    std::vector<std::string> tmp;
-    for (const auto &item : modelConfig["classNames"])
-        tmp.emplace_back(item.second.as<std::string>());
-
-    return tmp;
-}(); // 模型类别列表
-const bool showFlag = modelConfig["showFlag"].as<bool>(); // 绘制, 展示检测结果标志
-
-char waitKey_Flag;
-
-int main(int argc, char const *argv[])
-{
-
-    Model detectModel = Model(modelPath, inputSize, scoreThreshold, nmsThreshold);
-    cv::Mat frame = cv::imread("/app/assets/bus.jpg");
-    if (frame.empty()) {
-        assert("The Image is Empty, check the image path");
+bool IsPathExist(const string& path) {
+#ifdef _WIN32
+    DWORD fileAttributes = GetFileAttributesA(path.c_str());
+    return (fileAttributes != INVALID_FILE_ATTRIBUTES);
+#else
+    return (access(path.c_str(), F_OK) == 0);
+#endif
+}
+bool IsFile(const string& path) {
+    if (!IsPathExist(path)) {
+        printf("%s:%d %s not exist\n", __FILE__, __LINE__, path.c_str());
+        return false;
     }
-    bool detectFlag;
-    while (true)
+
+#ifdef _WIN32
+    DWORD fileAttributes = GetFileAttributesA(path.c_str());
+    return ((fileAttributes != INVALID_FILE_ATTRIBUTES) && ((fileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0));
+#else
+    struct stat buffer{};
+    return (stat(path.c_str(), &buffer) == 0 && S_ISREG(buffer.st_mode));
+#endif
+}
+
+/**
+ * @brief Setting up Tensorrt logger
+*/
+class Logger final : public nvinfer1::ILogger {
+    void log(const Severity severity, const char* msg) noexcept override {
+        // Only output logs with severity greater than warning
+        if (severity <= Severity::kWARNING)
+            std::cout << msg << std::endl;
+    }
+}logger;
+
+int main(int argc, char** argv)
+{
+    const string engine_file_path{ argv[1] };
+    const string path{ argv[2] };
+    vector<string> imagePathList;
+    bool                     isVideo{ false };
+    assert(argc == 3);
+
+    if (IsFile(path))
     {
-        detectFlag = detectModel.Detect(frame);
-        if (! detectFlag){
-            assert("Detect Failed");
-        }
-        // 绘制, 展示检测结果
-        if (showFlag)
+        string suffix = path.substr(path.find_last_of('.') + 1);
+        if (suffix == "jpg" || suffix == "jpeg" || suffix == "png")
         {
-            drawDetect(frame, detectModel.detectResults, classNames);
-            cv::imshow("img", frame);
-            waitKey_Flag = cv::waitKey(1);
-            if (waitKey_Flag == 113) // q
-                break;
+            imagePathList.push_back(path);
         }
+        else if (suffix == "mp4" || suffix == "avi" || suffix == "m4v" || suffix == "mpeg" || suffix == "mov" || suffix == "mkv" || suffix == "webm")
+        {
+            isVideo = true;
+        }
+        else {
+            printf("suffix %s is wrong !!!\n", suffix.c_str());
+            abort();
+        }
+    }
+    else if (IsPathExist(path))
+    {
+        glob(path + "/*.jpg", imagePathList);
+    }
+
+    // Assume it's a folder, add logic to handle folders
+    // init model
+    TensorrtInference model(engine_file_path, logger);
+
+    if (isVideo) {
+        //path to video
+        cv::VideoCapture cap(path);
+
+        while (true)
+        {
+            Mat image;
+            cap >> image;
+
+            if (image.empty()) break;
+
+            vector<Detection> objects;
+            model.preprocess(image);
+
+            auto start = std::chrono::system_clock::now();
+            model.infer();
+            auto end = std::chrono::system_clock::now();
+
+            model.postprocess(objects);
+            model.draw(image, objects);
+
+            auto tc = static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count()) / 1000.;
+            printf("cost %2.4lf ms\n", tc);
+
+            imshow("prediction", image);
+            waitKey(1);
+        }
+
+        // Release resources
+        destroyAllWindows();
+        cap.release();
+    }
+    else {
+        auto start_time = static_cast<double>(cv::getTickCount());
+        // path to folder saves images
+        for (const auto& imagePath : imagePathList) {
+            // open image
+           for (int i = 0; i< 1000; i++) {
+               Mat image = imread(imagePath);
+               if (image.empty()) {
+                   cerr << "Error reading image: " << imagePath << endl;
+                   continue;
+               }
+               auto preprocess_start_time = static_cast<double>(cv::getTickCount());
+               vector<Detection> objects;
+               model.preprocess(image);
+               std::cout << "Speed:"
+                         << ((static_cast<double>(cv::getTickCount()) - preprocess_start_time) / cv::getTickFrequency()) *
+                            1000 << "ms " << "preprocess,";
+               auto inference_start_time = static_cast<double>(cv::getTickCount());
+               model.infer();
+               std::cout << ((static_cast<double>(cv::getTickCount()) - inference_start_time) / cv::getTickFrequency()) *
+                            1000 << "ms inference, ";
+               auto postprocess_start_time = static_cast<double>(cv::getTickCount());
+               model.postprocess(objects);
+               std::cout << ((static_cast<double>(cv::getTickCount()) - postprocess_start_time) / cv::getTickFrequency()) *
+                            1000 << "ms postprocess, ";
+               std::cout << ((static_cast<double>(cv::getTickCount()) - preprocess_start_time) / cv::getTickFrequency()) *
+                            1000 << "ms total" << std::endl;
+           }
+//            namedWindow("Result",0);
+//            model.draw(image, objects);
+//            imshow("Result", image);
+//
+//            waitKey(1);
+        }
+        std::cout << "all time: " <<((static_cast<double>(cv::getTickCount()) - start_time) / cv::getTickFrequency()) << "s" << std::endl;
     }
 
     return 0;

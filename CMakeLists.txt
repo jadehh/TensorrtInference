@@ -1,9 +1,7 @@
 cmake_minimum_required(VERSION 3.22.1)
 set(DEMO_NAME "tensorrt_inference")
-project(${DEMO_NAME})
+project(${DEMO_NAME} LANGUAGES CXX CUDA)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
-
-
 set(CMAKE_CXX_STANDARD 17)
 SET(OPENCV_DIR "/usr/local/opencv" CACHE PATH "Location of libraries")
 SET(TENSORRT_DIR "/usr/local/tensorrt" CACHE PATH "Location of libraries")
@@ -26,10 +24,29 @@ if (NOT DEFINED YAML_CPP_DIR OR YAML_CPP_DIR STREQUAL "")
     message(FATAL_ERROR "please set YAML_CPP_DIR with -DYAML_CPP_DIR=/usr/local/yaml")
 endif ()
 
-
-set(OPENCV_INCLUDE_DIR "${OPENCV_DIR}/include/opencv4")
-set(OPENCV_LIB_DIR "${OPENCV_DIR}/lib")
-
+if (NOT WIN32)
+    set(OPENCV_INCLUDE_DIR "${OPENCV_DIR}/include/opencv4")
+    set(OPENCV_LIB_DIR "${OPENCV_DIR}/lib")
+    set(OPENCV_LIBS
+            opencv_calib3d
+            opencv_core
+            opencv_dnn
+            opencv_features2d
+            opencv_flann
+            opencv_highgui
+            opencv_imgcodecs
+            opencv_imgproc
+            opencv_ml
+            opencv_objdetect
+            opencv_photo
+            opencv_stitching
+            opencv_video
+            opencv_videoio)
+else ()
+    set(OPENCV_INCLUDE_DIR "${OPENCV_DIR}/build/include/")
+    set(OPENCV_LIB_DIR "${OPENCV_DIR}/build/x64/vc15/lib")
+    set(OPENCV_LIBS opencv_world455)
+endif ()
 set(TENSORRT_INCLUDE_DIR "${TENSORRT_DIR}/include")
 set(TENSORRT_LIB_DIR "${TENSORRT_DIR}/lib")
 
@@ -40,54 +57,43 @@ else ()
     set(CUDA_LIB_DIR "${CUDA_DIR}/lib/x64")
 endif ()
 
-set(YAML_CPP_INCLUDE_DIR "${YAML_DIR}/include")
-set(YAML_CPP_LIB_DIR "${YAML_DIR}/lib")
-
 include_directories(
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_BINARY_DIR}
         ${OPENCV_INCLUDE_DIR}
         ${TENSORRT_INCLUDE_DIR}
         ${CUDA_INCLUDE_DIR}
-        ${YAML_CPP_INCLUDE_DIR}
 )
 link_directories(
         ${OPENCV_LIB_DIR}
         ${TENSORRT_LIB_DIR}
         ${CUDA_LIB_DIR}
-        ${YAML_CPP_LIB_DIR}
 )
 set(CUDA_LIBS cudart)
-set(TENSORRT_LIBS nvinfer)
-set(YAML_CPP_LIBS yaml-cpp)
-set(OPENCV_LIBS
-        opencv_calib3d
-        opencv_core
-        opencv_dnn
-        opencv_features2d
-        opencv_flann
-        opencv_highgui
-        opencv_imgcodecs
-        opencv_imgproc
-        opencv_ml
-        opencv_objdetect
-        opencv_photo
-        opencv_stitching
-        opencv_video
-        opencv_videoio)
+if (NOT WIN32)
+    set(TENSORRT_LIBS
+            nvinfer
+            nvonnxparser
+            nvinfer_plugin
+    )
+else ()
+    set(TENSORRT_LIBS
+            nvinfer_10
+            nvonnxparser_10
+            nvinfer_plugin_10
+    )
+endif ()
+
 
 # 消除警告
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     add_compile_options(-Wno-deprecated-declarations)
 endif ()
-
+AUX_SOURCE_DIRECTORY(./src SRCS)
 add_executable(
         ${DEMO_NAME}
-        utils/include/model.hpp
-        utils/model.cpp
-        utils/include/draw.hpp
-        utils/draw.cpp
         main.cpp
+        ${SRCS}
 )
 if (NOT WIN32)
     target_link_libraries(
@@ -96,7 +102,6 @@ if (NOT WIN32)
             ${CUDA_LIBS}
             ${TENSORRT_LIBS}
             ${OPENCV_LIBS}
-            ${YAML_CPP_LIBS}
     )
 else ()
     target_link_libraries(
@@ -104,13 +109,13 @@ else ()
             ${CUDA_LIBS}
             ${TENSORRT_LIBS}
             ${OPENCV_LIBS}
-            ${YAML_CPP_LIBS}
     )
 endif ()
 if (WIN32)
     add_custom_command(TARGET ${DEMO_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${YAML_DIR}/lib/yaml-cpp.dll ./yaml-cpp.dll
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENCV_DIR}/build/x64/vc16/bin/opencv_world4110.dll ./opencv_world4110.dll
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENCV_DIR}/build/x64/vc16/bin/opencv_world4110d.dll ./opencv_world4110d.dll
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENCV_DIR}/build/x64/vc15/bin/opencv_world455d.dll ./DEBUG/opencv_world455d.dll
+    )
+    add_custom_command(TARGET ${DEMO_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENCV_DIR}/build/x64/vc15/bin/opencv_world455.dll ./Release/opencv_world455.dll
     )
 endif ()
