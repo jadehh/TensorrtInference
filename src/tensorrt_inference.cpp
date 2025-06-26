@@ -139,7 +139,7 @@ void TensorrtInference::postprocess(vector<Detection> &output) const {
     cudaEventElapsedTime(&copy_ms, copy_start, copy_stop);
     std::cout << "D2H Copy: " << copy_ms << " ms, Data: " << (num_detections * detection_attribute_size * sizeof(float)/1024.0)<< "KB,";
     CUDA_CHECK(cudaStreamSynchronize(post_process_stream));
-    std::cout << "cuda_memcpy_start_time: " <<  ((static_cast<double>(cv::getTickCount()) - cuda_memcpy_start_time) / cv::getTickFrequency()) *  1000 << "ms,";
+    std::cout << "cuda_memcpy_time: " <<  ((static_cast<double>(cv::getTickCount()) - cuda_memcpy_start_time) / cv::getTickFrequency()) *  1000 << "ms,";
     const auto nms_box_start_time =  static_cast<double>(cv::getTickCount());
     vector<Rect> boxes;
     vector<int> class_ids;
@@ -172,7 +172,7 @@ void TensorrtInference::postprocess(vector<Detection> &output) const {
         result.bbox = boxes[idx];
         output.push_back(result);
     }
-    std::cout << "nms_box_start_time: " <<  ((static_cast<double>(cv::getTickCount()) - nms_box_start_time) / cv::getTickFrequency()) *  1000 << "ms,";
+    std::cout << "nms_box_time: " <<  ((static_cast<double>(cv::getTickCount()) - nms_box_start_time) / cv::getTickFrequency()) *  1000 << "ms,";
 
 }
 

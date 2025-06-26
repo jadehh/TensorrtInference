@@ -116,23 +116,23 @@ int main(int argc, char** argv)
         // path to folder saves images
         for (const auto& imagePath : imagePathList) {
             // open image
+            Mat image = imread(imagePath, cv::IMREAD_COLOR);
             for (int i = 0; i< count; i++) {
-                Mat image = imread(imagePath, cv::IMREAD_COLOR);
                 if (image.empty()) {
                    cerr << "Error reading image: " << imagePath << endl;
                    continue;
                }
-//               auto preprocess_start_time = static_cast<double>(cv::getTickCount());
-//               vector<Detection> objects;
-//               model.preprocess(image);
-//               std::cout << "preprocess: " << (static_cast<double>(cv::getTickCount()) - preprocess_start_time) / cv::getTickFrequency() * 1000 << "ms,";
-//               auto inference_start_time = static_cast<double>(cv::getTickCount());
-//               model.infer();
-//               std::cout << "inference: " << ((static_cast<double>(cv::getTickCount()) - inference_start_time) / cv::getTickFrequency()) * 1000 << "ms,";
-//               auto postprocess_start_time = static_cast<double>(cv::getTickCount());
-//               model.postprocess(objects);
-//               std::cout <<"postprocess: "<<  ((static_cast<double>(cv::getTickCount()) - postprocess_start_time) / cv::getTickFrequency()) * 1000 << "ms,";
-//               std::cout << "total: "<<  ((static_cast<double>(cv::getTickCount()) - preprocess_start_time) / cv::getTickFrequency()) * 1000 << "ms," << std::endl;
+               auto preprocess_start_time = static_cast<double>(cv::getTickCount());
+               vector<Detection> objects;
+               model.preprocess(image);
+               std::cout << "preprocess: " << (static_cast<double>(cv::getTickCount()) - preprocess_start_time) / cv::getTickFrequency() * 1000 << "ms,";
+               auto inference_start_time = static_cast<double>(cv::getTickCount());
+               model.infer();
+               std::cout << "inference: " << ((static_cast<double>(cv::getTickCount()) - inference_start_time) / cv::getTickFrequency()) * 1000 << "ms,";
+               auto postprocess_start_time = static_cast<double>(cv::getTickCount());
+               model.postprocess(objects);
+               std::cout <<"postprocess: "<<  ((static_cast<double>(cv::getTickCount()) - postprocess_start_time) / cv::getTickFrequency()) * 1000 << "ms,";
+               std::cout << "total: "<<  ((static_cast<double>(cv::getTickCount()) - preprocess_start_time) / cv::getTickFrequency()) * 1000 << "ms," << std::endl;
 //                namedWindow("Result",0);
 //                model.draw(image, objects);
 //                imshow("Result", image);
