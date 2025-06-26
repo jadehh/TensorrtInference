@@ -33,7 +33,7 @@ private:
     float* gpu_buffers[3]{};               //!< The vector of device buffers needed for engine execution
     float* cpu_output_buffer{};
 
-    cudaStream_t stream{};
+    cudaStream_t stream{}, pre_process_stream{} , post_process_stream{};
     IRuntime* runtime{};                 //!< The TensorRT runtime used to deserialize the engine
     ICudaEngine* engine{};               //!< The TensorRT engine used to run the network
     IExecutionContext* context{};        //!< The context for executing inference using an ICudaEngine

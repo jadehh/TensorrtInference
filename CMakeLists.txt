@@ -1,7 +1,12 @@
 cmake_minimum_required(VERSION 3.22.1)
 set(DEMO_NAME "tensorrt_inference")
 project(${DEMO_NAME} LANGUAGES CXX CUDA)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
+if(MSVC)
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2 /arch:AVX2")
+else()
+    add_compile_options(-O3)  # GCC/Clang 专用
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 SET(OPENCV_DIR "/usr/local/opencv" CACHE PATH "Location of libraries")
 SET(TENSORRT_DIR "/usr/local/tensorrt" CACHE PATH "Location of libraries")
@@ -44,8 +49,8 @@ if (NOT WIN32)
             opencv_videoio)
 else ()
     set(OPENCV_INCLUDE_DIR "${OPENCV_DIR}/build/include/")
-    set(OPENCV_LIB_DIR "${OPENCV_DIR}/build/x64/vc15/lib")
-    set(OPENCV_LIBS opencv_world455)
+    set(OPENCV_LIB_DIR "${OPENCV_DIR}/build/x64/vc16/lib")
+    set(OPENCV_LIBS opencv_world4110)
 #    set(OPENCV_LIBS opencv_world455d)
 endif ()
 set(TENSORRT_INCLUDE_DIR "${TENSORRT_DIR}/include")
@@ -114,9 +119,9 @@ else ()
 endif ()
 if (WIN32)
     add_custom_command(TARGET ${DEMO_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENCV_DIR}/build/x64/vc15/bin/opencv_world455d.dll ./DEBUG/opencv_world455d.dll
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENCV_DIR}/build/x64/vc16/bin/opencv_world4110d.dll ./DEBUG/opencv_world4110d.dll
     )
     add_custom_command(TARGET ${DEMO_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENCV_DIR}/build/x64/vc15/bin/opencv_world455.dll ./Release/opencv_world455.dll
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${OPENCV_DIR}/build/x64/vc16/bin/opencv_world4110.dll ./Release/opencv_world4110.dll
     )
 endif ()

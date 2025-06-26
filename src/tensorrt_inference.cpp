@@ -62,7 +62,6 @@ void TensorrtInference::init(std::string engine_path, nvinfer1::ILogger &logger)
     detection_attribute_size = engine->getBindingDimensions(1).d[1];
     num_detections = engine->getBindingDimensions(1).d[2];
 #else
-
     const auto [inputDims, input] = this->engine->getTensorShape("images");
     const auto [outputDims,  output] = this->engine->getTensorShape("output0");
     input_h = static_cast<int>(input[2]);
@@ -72,7 +71,7 @@ void TensorrtInference::init(std::string engine_path, nvinfer1::ILogger &logger)
 #endif
     num_classes = detection_attribute_size - 4;
     // Initialize input buffers
-    CUDA_CHECK(cudaMallocHost(&cpu_output_buffer, detection_attribute_size * num_detections * sizeof(float));)
+    CUDA_CHECK(cudaMallocHost(&cpu_output_buffer, detection_attribute_size * num_detections * sizeof(float)));
 
     CUDA_CHECK(cudaMalloc(&gpu_buffers[0], 3 * input_w * input_h * sizeof(float)));
     // Initialize output buffer
@@ -81,6 +80,8 @@ void TensorrtInference::init(std::string engine_path, nvinfer1::ILogger &logger)
     CUDA_CHECK(cudaMalloc(&gpu_buffers[2], detection_attribute_size * num_detections * sizeof(float)));
     cuda_preprocess_init(MAX_IMAGE_SIZE);
     CUDA_CHECK(cudaStreamCreate(&stream));
+    CUDA_CHECK(cudaStreamCreate(&pre_process_stream));
+    CUDA_CHECK(cudaStreamCreate(&post_process_stream));
     if (warmup) {
         for (int i = 0; i < 10; i++) {
             this->infer();
@@ -95,8 +96,7 @@ TensorrtInference::~TensorrtInference() {
     CUDA_CHECK(cudaStreamDestroy(stream));
     for (const auto & gpu_buffer : gpu_buffers)
         CUDA_CHECK(cudaFree(gpu_buffer));
-    delete[] cpu_output_buffer;
-
+    CUDA_CHECK(cudaFreeHost(cpu_output_buffer));
     // Destroy the engine
     cuda_preprocess_destroy();
     delete context;
@@ -106,8 +106,8 @@ TensorrtInference::~TensorrtInference() {
 
 void TensorrtInference::preprocess(Mat &image) const {
     // Preprocessing data on gpu
-    cuda_preprocess(image.ptr(), image.cols, image.rows, gpu_buffers[0], input_w, input_h, stream);
-    CUDA_CHECK(cudaStreamSynchronize(stream));
+    cuda_preprocess(image.ptr(), image.cols, image.rows, gpu_buffers[0], input_w, input_h, pre_process_stream);
+    CUDA_CHECK(cudaStreamSynchronize(pre_process_stream));
 }
 
 void TensorrtInference::infer() const {
@@ -118,28 +118,29 @@ void TensorrtInference::infer() const {
     context->setTensorAddress("images", gpu_buffers[0]);
     context->setTensorAddress("output0",gpu_buffers[1]);
     this->context->enqueueV3(stream);
+//    this->context->executeV2((void **) gpu_buffers);
 #endif
 }
 
 void TensorrtInference::postprocess(vector<Detection> &output) const {
     const auto cuda_postprocess_start_time = static_cast<double>(cv::getTickCount());
-    cuda_postprocess(gpu_buffers[1], num_detections, num_classes, conf_threshold, gpu_buffers[2], stream);
+    cuda_postprocess(gpu_buffers[1], num_detections, num_classes, conf_threshold, gpu_buffers[2], post_process_stream);
     std::cout <<"cuda_postprocess: " << ((static_cast<double>(cv::getTickCount()) - cuda_postprocess_start_time) / cv::getTickFrequency()) * 1000 << "ms,";
     const auto cuda_memcpy_start_time = static_cast<double>(cv::getTickCount());
     // 添加精确计时
     cudaEvent_t copy_start, copy_stop;
     cudaEventCreate(&copy_start);
     cudaEventCreate(&copy_stop);
-    cudaEventRecord(copy_start, stream);
-    CUDA_CHECK(cudaMemcpyAsync(cpu_output_buffer, gpu_buffers[2], num_detections * detection_attribute_size * sizeof(float),cudaMemcpyDeviceToHost, stream));
-    cudaEventRecord(copy_stop, stream);
+    cudaEventRecord(copy_start, post_process_stream);
+    CUDA_CHECK(cudaMemcpyAsync(cpu_output_buffer, gpu_buffers[2], num_detections * detection_attribute_size * sizeof(float),cudaMemcpyDeviceToHost, post_process_stream));
+    cudaEventRecord(copy_stop, post_process_stream);
     cudaEventSynchronize(copy_stop);
     float copy_ms = 0;
     cudaEventElapsedTime(&copy_ms, copy_start, copy_stop);
     std::cout << "D2H Copy: " << copy_ms << " ms, Data: " << (num_detections * detection_attribute_size * sizeof(float)/1024.0)<< "KB,";
+    CUDA_CHECK(cudaStreamSynchronize(post_process_stream));
     std::cout << "cuda_memcpy_start_time: " <<  ((static_cast<double>(cv::getTickCount()) - cuda_memcpy_start_time) / cv::getTickFrequency()) *  1000 << "ms,";
-    CUDA_CHECK(cudaStreamSynchronize(stream));
-
+    const auto nms_box_start_time =  static_cast<double>(cv::getTickCount());
     vector<Rect> boxes;
     vector<int> class_ids;
     vector<float> confidences;
@@ -171,6 +172,8 @@ void TensorrtInference::postprocess(vector<Detection> &output) const {
         result.bbox = boxes[idx];
         output.push_back(result);
     }
+    std::cout << "nms_box_start_time: " <<  ((static_cast<double>(cv::getTickCount()) - nms_box_start_time) / cv::getTickFrequency()) *  1000 << "ms,";
+
 }
 
 void TensorrtInference::build(std::string onnxPath, nvinfer1::ILogger &logger) {
